@@ -1,6 +1,6 @@
 {
   "name": "@imqueue/opentelemetry-instrumentation-imqueue",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "description": "This module provides OpenTelemetry instrumentation for @imqueue",
   "keywords": [
     "imqueue",
@@ -28,12 +28,19 @@
     "help": "npm-scripts-help"
   },
   "mocha": {
-    "require": ["ts-node/register", "source-map-support/register"],
+    "require": [
+      "ts-node/register",
+      "source-map-support/register"
+    ],
     "recursive": true,
     "bail": true,
     "full-trace": true,
-    "spec": ["test/src/**/*.ts"],
-    "ignore": ["**/*.d.ts"]
+    "spec": [
+      "test/src/**/*.ts"
+    ],
+    "ignore": [
+      "**/*.d.ts"
+    ]
   },
   "author": "imqueue.com <support@imqueue.com>",
   "license": "GPL-3.0-only",
