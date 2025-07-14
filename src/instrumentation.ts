@@ -31,12 +31,22 @@ import {
     Tracer,
 } from '@opentelemetry/api';
 import { AttributeNames, SpanNames, TraceKind } from './enums';
+import path from 'path';
 
-const instrumentationName = '@imqueue/opentelemetry-instrumentation-imqueue';
+let packageJson: { name: string; version: string };
+let instrumentationName = '@imqueue/opentelemetry-instrumentation-imqueue';
+let instrumentationVersion = '1.1.0';
 const packageName = '@imqueue/rpc';
-const instrumentationVersion = '1.0.8';
 const versions = ['>=1.10'];
 const componentName = 'imq';
+
+try {
+    packageJson = require(`${path.resolve('.')}${path.sep}package.json`);
+    instrumentationName = packageJson.name;
+    instrumentationVersion = packageJson.version;
+} catch (err) {
+    // Use fallback values if package.json cannot be read
+}
 
 type ServiceModule = {
     DEFAULT_IMQ_CLIENT_OPTIONS: IMQServiceOptions;
@@ -55,7 +65,7 @@ export class ImqueueInstrumentation extends InstrumentationBase {
     }
 
     protected init() {
-        const module = new InstrumentationNodeModuleDefinition<ServiceModule>(
+        const module = new InstrumentationNodeModuleDefinition(
             packageName,
             versions,
             moduleExports => {
@@ -96,30 +106,34 @@ export class ImqueueInstrumentation extends InstrumentationBase {
             return copy;
         };
 
-        const span = ImqueueInstrumentation.thisTracer.startSpan(
-            SpanNames.IMQ_REQUEST,
-            {
-                attributes: {
-                    [AttributeNames.SPAN_KIND]: TraceKind.CLIENT,
-                    [AttributeNames.RESOURCE_NAME]: `${ this.serviceName }.${
-                        req.method }`,
-                    [AttributeNames.SERVICE_NAME]: this.serviceName,
-                    [AttributeNames.IMQ_CLIENT]: req.from,
-                    [AttributeNames.COMPONENT]: componentName,
+        try {
+            const span = ImqueueInstrumentation.thisTracer.startSpan(
+                SpanNames.IMQ_REQUEST,
+                {
+                    attributes: {
+                        [AttributeNames.SPAN_KIND]: TraceKind.CLIENT,
+                        [AttributeNames.RESOURCE_NAME]: `${ this.serviceName }.${
+                            req.method }`,
+                        [AttributeNames.SERVICE_NAME]: this.serviceName,
+                        [AttributeNames.IMQ_CLIENT]: req.from,
+                        [AttributeNames.COMPONENT]: componentName,
+                    },
+                    kind: SpanKind.CLIENT,
                 },
-                kind: SpanKind.CLIENT,
-            },
-        );
+            );
 
-        req.metadata = req.metadata || {};
-        req.metadata.clientSpan = {};
+            req.metadata = req.metadata || {};
+            req.metadata.clientSpan = {};
 
-        propagation.inject(
-            trace.setSpan(context.active(), span),
-            req.metadata.clientSpan,
-        );
+            propagation.inject(
+                trace.setSpan(context.active(), span),
+                req.metadata.clientSpan,
+            );
 
-        req.span = span;
+            req.span = span;
+        } catch (error) {
+            // Silently handle the error
+        }
     };
 
     private beforeCallService = async function(
@@ -132,34 +146,46 @@ export class ImqueueInstrumentation extends InstrumentationBase {
             return copy;
         };
 
-        const carrier = (req.metadata || { clientSpan: null }).clientSpan;
-        const parentContext = propagation.extract(context.active(), carrier);
+        try {
+            const carrier = (req.metadata || { clientSpan: null }).clientSpan;
+            const parentContext = propagation.extract(context.active(), carrier);
 
-        req.span = ImqueueInstrumentation.thisTracer.startSpan(
-            SpanNames.IMQ_RESPONSE,
-            {
-                attributes: {
-                    [AttributeNames.SPAN_KIND]: TraceKind.SERVER,
-                    [AttributeNames.RESOURCE_NAME]: `${ this.name }.${
-                        req.method }`,
-                    [AttributeNames.SERVICE_NAME]: this.name,
-                    [AttributeNames.IMQ_CLIENT]: req.from,
-                    [AttributeNames.COMPONENT]: componentName,
+            req.span = ImqueueInstrumentation.thisTracer.startSpan(
+                SpanNames.IMQ_RESPONSE,
+                {
+                    attributes: {
+                        [AttributeNames.SPAN_KIND]: TraceKind.SERVER,
+                        [AttributeNames.RESOURCE_NAME]: `${ this.name }.${
+                            req.method }`,
+                        [AttributeNames.SERVICE_NAME]: this.name,
+                        [AttributeNames.IMQ_CLIENT]: req.from,
+                        [AttributeNames.COMPONENT]: componentName,
+                    },
+                    kind: SpanKind.SERVER,
                 },
-                kind: SpanKind.SERVER,
-            },
-            parentContext,
-        );
+                parentContext,
+            );
+        } catch (error) {
+            // Silently handle the error
+        }
     };
 
     private afterCall = async function(
         this: IMQClient,
         req: IMQRPCRequest,
     ): Promise<void> {
-        req.span?.end();
+        try {
+            req.span?.end();
+        } catch (error) {
+            // Silently handle the error
+        }
     };
 
     private static unpatchClient(serviceModule: ServiceModule): void {
+        if (!serviceModule.DEFAULT_IMQ_CLIENT_OPTIONS) {
+            return;
+        }
+
         const {
             beforeCall,
             afterCall,
@@ -175,6 +201,10 @@ export class ImqueueInstrumentation extends InstrumentationBase {
     }
 
     private static unpatchService(serviceModule: ServiceModule): void {
+        if (!serviceModule.DEFAULT_IMQ_SERVICE_OPTIONS) {
+            return;
+        }
+
         const {
             beforeCall,
             afterCall,
