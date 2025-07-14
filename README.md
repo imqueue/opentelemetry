@@ -21,14 +21,15 @@ npm i --save @imqueue/opentelemtry-instrumentation-imqueue
 
 OpenTelemetry Imqueue Instrumentation allows the user to automatically collect trace data and export them to their backend of choice, to give observability to distributed systems.
 
-```js
-const { NodeTracerProvider } = require('@opentelemetry/sdk-trace-node');
-const { registerInstrumentations } = require('@opentelemetry/instrumentation');
-const {
+```typescript
+import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
+import { registerInstrumentations } from '@opentelemetry/instrumentation';
+import {
     ImqueueInstrumentation,
-} = require('@imqueue/opentelemetry-instrumentation-imqueue');
+} from '@imqueue/opentelemetry-instrumentation-imqueue';
 
 const provider = new NodeTracerProvider();
+
 provider.register();
 
 registerInstrumentations({
