@@ -5,7 +5,7 @@ import { IMQClient, IMQRPCRequest } from '../../src/imq/types';
 
 const mockPackageJson = {
     name: '@imqueue/opentelemetry-instrumentation-imqueue',
-    version: '1.1.0'
+    version: '2.0.2'
 };
 
 const originalRequire = require;
