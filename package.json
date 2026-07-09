@@ -1,6 +1,6 @@
 {
   "name": "@imqueue/opentelemetry-instrumentation-imqueue",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "This module provides OpenTelemetry instrumentation for @imqueue",
   "keywords": [
     "imqueue",
