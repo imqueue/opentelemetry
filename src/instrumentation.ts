@@ -31,7 +31,7 @@ import path from 'path';
 
 let packageJson: { name: string; version: string };
 let instrumentationName = '@imqueue/opentelemetry-instrumentation-imqueue';
-let instrumentationVersion = '2.0.3';
+let instrumentationVersion = '3.0.0';
 const packageName = '@imqueue/rpc';
 const versions = ['>=1.10'];
 const componentName = 'imq';
