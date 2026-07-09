@@ -19,6 +19,6 @@
  * purchase a proprietary commercial license. Please contact us at
  * <support@imqueue.com> to get commercial licensing options.
  */
-export * from './instrumentation';
-export * from './types';
-export * from './enums';
+export * from './instrumentation.js';
+export * from './types.js';
+export * from './enums/index.js';

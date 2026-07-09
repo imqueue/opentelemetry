@@ -15,19 +15,24 @@
  */
 import {
     InstrumentationBase,
-    InstrumentationConfig,
+    type InstrumentationConfig,
     InstrumentationNodeModuleDefinition,
 } from '@opentelemetry/instrumentation';
-import { IMQClient, IMQRPCRequest, IMQServiceOptions } from './imq/types';
+import {
+    type IMQClient,
+    type IMQRPCRequest,
+    type IMQServiceOptions,
+} from './imq/types.js';
 import {
     context,
     propagation,
     SpanKind,
     trace,
-    Tracer,
+    type Tracer,
 } from '@opentelemetry/api';
-import { AttributeNames, SpanNames, TraceKind } from './enums';
-import path from 'path';
+import { AttributeNames, SpanNames, TraceKind } from './enums/index.js';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 
 let packageJson: { name: string; version: string };
 let instrumentationName = '@imqueue/opentelemetry-instrumentation-imqueue';
@@ -37,7 +42,9 @@ const versions = ['>=1.10'];
 const componentName = 'imq';
 
 try {
-    packageJson = require(`${path.resolve('.')}${path.sep}package.json`);
+    packageJson = JSON.parse(
+        readFileSync(`${path.resolve('.')}${path.sep}package.json`, 'utf8'),
+    );
     instrumentationName = packageJson.name;
     instrumentationVersion = packageJson.version;
 } catch {

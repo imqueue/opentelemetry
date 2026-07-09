@@ -19,17 +19,18 @@
  * purchase a proprietary commercial license. Please contact us at
  * <support@imqueue.com> to get commercial licensing options.
  */
-import { Span, trace, SpanKind, SpanStatusCode } from '@opentelemetry/api';
+import { readFileSync } from 'node:fs';
+import { type Span, trace, SpanKind, SpanStatusCode } from '@opentelemetry/api';
 import * as path from 'path';
 import {
     SpanNames,
     TraceKind,
-    TracedOptions,
+    type TracedOptions,
     AttributeNames,
-    TraceAttributes,
-} from './src';
+    type TraceAttributes,
+} from './src/index.js';
 
-export * from './src/instrumentation';
+export * from './src/instrumentation.js';
 
 const traces: { [name: string]: Span } = {};
 const componentName = 'imq';
@@ -92,7 +93,9 @@ const DEFAULT_TRACED_OPTIONS: TracedOptions = {
 let pkgName = '';
 
 try {
-    pkgName = require(`${path.resolve('.')}${path.sep}package.json`).name;
+    pkgName = JSON.parse(
+        readFileSync(`${path.resolve('.')}${path.sep}package.json`, 'utf8'),
+    ).name;
 } catch {
     /* ignore */
 }

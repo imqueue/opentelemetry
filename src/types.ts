@@ -19,7 +19,7 @@
  * purchase a proprietary commercial license. Please contact us at
  * <support@imqueue.com> to get commercial licensing options.
  */
-import { TraceKind } from './enums';
+import { TraceKind } from './enums/index.js';
 
 export interface TracedOptions {
     kind: TraceKind;

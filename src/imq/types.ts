@@ -13,7 +13,7 @@
  * OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
  */
-import { Span } from '@opentelemetry/api';
+import { type Span } from '@opentelemetry/api';
 
 export interface IMQClient {
     name: string;

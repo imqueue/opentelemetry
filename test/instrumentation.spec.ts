@@ -17,12 +17,15 @@
  */
 import { describe, it, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { propagation, trace } from '@opentelemetry/api';
-import { IMQClient, IMQRPCRequest } from '../src/imq/types';
-import { ImqueueInstrumentation } from '..';
+import { type IMQClient, type IMQRPCRequest } from '../src/imq/types.js';
+import { ImqueueInstrumentation } from '../index.js';
 
-const self = require('../package.json');
+const self = JSON.parse(
+    readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+);
 
 const client: IMQClient = {
     name: 'client-name',
@@ -89,25 +92,26 @@ describe('ImqueueInstrumentation', () => {
             assert.equal(instrumentation.instrumentationVersion, self.version);
         });
 
-        it('should fall back to defaults when no package.json exists', () => {
+        it('should fall back to defaults when no package.json exists', async () => {
             const cwd = process.cwd();
-            const modulePath = require.resolve('../src/instrumentation');
 
-            delete require.cache[modulePath];
             process.chdir(tmpdir());
 
             try {
-                // a fresh module load from a directory without package.json
-                // exercises the fallback branch
-                const {
-                    ImqueueInstrumentation: Fallback,
-                } = require('../src/instrumentation');
+                // a fresh, query-busted copy evaluates from a directory
+                // without package.json, exercising the fallback branch (the
+                // ES module registry is immutable, hence the unique URL)
+                const href = new URL(
+                    '../src/instrumentation.js',
+                    import.meta.url,
+                ).href;
+                const { ImqueueInstrumentation: Fallback } = await import(
+                    `${href}?fallback=1`
+                );
 
                 assert.ok(new Fallback() instanceof Fallback);
             } finally {
                 process.chdir(cwd);
-                delete require.cache[modulePath];
-                require('../src/instrumentation');
             }
         });
     });

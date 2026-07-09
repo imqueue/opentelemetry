@@ -19,6 +19,6 @@
  * purchase a proprietary commercial license. Please contact us at
  * <support@imqueue.com> to get commercial licensing options.
  */
-export * from './TraceKind';
-export * from './AttributeNames';
-export * from './SpanNames';
+export * from './TraceKind.js';
+export * from './AttributeNames.js';
+export * from './SpanNames.js';
