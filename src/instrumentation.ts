@@ -18,11 +18,7 @@ import {
     InstrumentationConfig,
     InstrumentationNodeModuleDefinition,
 } from '@opentelemetry/instrumentation';
-import {
-    IMQClient,
-    IMQRPCRequest,
-    IMQServiceOptions,
-} from './imq/types';
+import { IMQClient, IMQRPCRequest, IMQServiceOptions } from './imq/types';
 import {
     context,
     propagation,
@@ -44,7 +40,7 @@ try {
     packageJson = require(`${path.resolve('.')}${path.sep}package.json`);
     instrumentationName = packageJson.name;
     instrumentationVersion = packageJson.version;
-} catch (err) {
+} catch {
     // Use fallback values if package.json cannot be read
 }
 
@@ -71,15 +67,15 @@ export class ImqueueInstrumentation extends InstrumentationBase {
             moduleExports => {
                 const { beforeCallClient, beforeCallService, afterCall } = this;
 
-                Object.assign(
-                    moduleExports.DEFAULT_IMQ_CLIENT_OPTIONS,
-                    { beforeCall: beforeCallClient, afterCall },
-                );
+                Object.assign(moduleExports.DEFAULT_IMQ_CLIENT_OPTIONS, {
+                    beforeCall: beforeCallClient,
+                    afterCall,
+                });
 
-                Object.assign(
-                    moduleExports.DEFAULT_IMQ_SERVICE_OPTIONS,
-                    { beforeCall: beforeCallService, afterCall },
-                );
+                Object.assign(moduleExports.DEFAULT_IMQ_SERVICE_OPTIONS, {
+                    beforeCall: beforeCallService,
+                    afterCall,
+                });
 
                 return moduleExports;
             },
@@ -96,9 +92,9 @@ export class ImqueueInstrumentation extends InstrumentationBase {
         return module;
     }
 
-    private beforeCallClient = async function(
+    private beforeCallClient = async function (
         this: IMQClient,
-        req: IMQRPCRequest
+        req: IMQRPCRequest,
     ): Promise<void> {
         req.toJSON = () => {
             const copy = Object.assign({}, req);
@@ -112,8 +108,9 @@ export class ImqueueInstrumentation extends InstrumentationBase {
                 {
                     attributes: {
                         [AttributeNames.SPAN_KIND]: TraceKind.CLIENT,
-                        [AttributeNames.RESOURCE_NAME]: `${ this.serviceName }.${
-                            req.method }`,
+                        [AttributeNames.RESOURCE_NAME]: `${this.serviceName}.${
+                            req.method
+                        }`,
                         [AttributeNames.SERVICE_NAME]: this.serviceName,
                         [AttributeNames.IMQ_CLIENT]: req.from,
                         [AttributeNames.COMPONENT]: componentName,
@@ -131,14 +128,14 @@ export class ImqueueInstrumentation extends InstrumentationBase {
             );
 
             req.span = span;
-        } catch (error) {
+        } catch {
             // Silently handle the error
         }
     };
 
-    private beforeCallService = async function(
+    private beforeCallService = async function (
         this: IMQClient,
-        req: IMQRPCRequest
+        req: IMQRPCRequest,
     ): Promise<void> {
         req.toJSON = () => {
             const copy = Object.assign({}, req);
@@ -148,15 +145,19 @@ export class ImqueueInstrumentation extends InstrumentationBase {
 
         try {
             const carrier = (req.metadata || { clientSpan: null }).clientSpan;
-            const parentContext = propagation.extract(context.active(), carrier);
+            const parentContext = propagation.extract(
+                context.active(),
+                carrier,
+            );
 
             req.span = ImqueueInstrumentation.thisTracer.startSpan(
                 SpanNames.IMQ_RESPONSE,
                 {
                     attributes: {
                         [AttributeNames.SPAN_KIND]: TraceKind.SERVER,
-                        [AttributeNames.RESOURCE_NAME]: `${ this.name }.${
-                            req.method }`,
+                        [AttributeNames.RESOURCE_NAME]: `${this.name}.${
+                            req.method
+                        }`,
                         [AttributeNames.SERVICE_NAME]: this.name,
                         [AttributeNames.IMQ_CLIENT]: req.from,
                         [AttributeNames.COMPONENT]: componentName,
@@ -165,18 +166,18 @@ export class ImqueueInstrumentation extends InstrumentationBase {
                 },
                 parentContext,
             );
-        } catch (error) {
+        } catch {
             // Silently handle the error
         }
     };
 
-    private afterCall = async function(
+    private afterCall = async function (
         this: IMQClient,
         req: IMQRPCRequest,
     ): Promise<void> {
         try {
             req.span?.end();
-        } catch (error) {
+        } catch {
             // Silently handle the error
         }
     };
@@ -186,10 +187,8 @@ export class ImqueueInstrumentation extends InstrumentationBase {
             return;
         }
 
-        const {
-            beforeCall,
-            afterCall,
-        } = serviceModule.DEFAULT_IMQ_CLIENT_OPTIONS;
+        const { beforeCall, afterCall } =
+            serviceModule.DEFAULT_IMQ_CLIENT_OPTIONS;
 
         if (beforeCall) {
             delete serviceModule.DEFAULT_IMQ_CLIENT_OPTIONS.beforeCall;
@@ -205,10 +204,8 @@ export class ImqueueInstrumentation extends InstrumentationBase {
             return;
         }
 
-        const {
-            beforeCall,
-            afterCall,
-        } = serviceModule.DEFAULT_IMQ_SERVICE_OPTIONS;
+        const { beforeCall, afterCall } =
+            serviceModule.DEFAULT_IMQ_SERVICE_OPTIONS;
 
         if (beforeCall) {
             delete serviceModule.DEFAULT_IMQ_SERVICE_OPTIONS.beforeCall;

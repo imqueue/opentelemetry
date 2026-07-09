@@ -19,12 +19,7 @@
  * purchase a proprietary commercial license. Please contact us at
  * <support@imqueue.com> to get commercial licensing options.
  */
-import {
-    Span,
-    trace,
-    SpanKind,
-    SpanStatusCode,
-} from '@opentelemetry/api';
+import { Span, trace, SpanKind, SpanStatusCode } from '@opentelemetry/api';
 import * as path from 'path';
 import {
     SpanNames,
@@ -68,13 +63,13 @@ export function traceStart(
 ) {
     if (traces[name]) {
         throw new TypeError(
-            `Trace with name ${ name } has been already started!`,
+            `Trace with name ${name} has been already started!`,
         );
     }
 
-    traces[name] = trace.getTracer(
-        tracerName || defaultTracerName,
-    ).startSpan(name);
+    traces[name] = trace
+        .getTracer(tracerName || defaultTracerName)
+        .startSpan(name);
 }
 
 // noinspection JSUnusedGlobalSymbols
@@ -97,8 +92,10 @@ const DEFAULT_TRACED_OPTIONS: TracedOptions = {
 let pkgName = '';
 
 try {
-    pkgName = require(`${ path.resolve('.') }${ path.sep }package.json`).name;
-} catch (err) { /* ignore */ }
+    pkgName = require(`${path.resolve('.')}${path.sep}package.json`).name;
+} catch {
+    /* ignore */
+}
 
 // noinspection JSUnusedGlobalSymbols
 /**
@@ -113,26 +110,35 @@ export function traced(options?: Partial<TracedOptions>) {
     ) => {
         const original = descriptor.value;
         const opts: TracedOptions = Object.assign(
-            {}, DEFAULT_TRACED_OPTIONS, options || {},
+            {},
+            DEFAULT_TRACED_OPTIONS,
+            options || {},
         );
         const tracerInstance = trace.getTracer(
             opts.tracerName || defaultTracerName,
         );
 
-        descriptor.value = function<T>(...args: any[]) {
+        descriptor.value = function (...args: any[]) {
             const className = this.constructor.name;
-            const attributes = Object.assign({
-                [AttributeNames.SPAN_KIND]: opts.kind,
-                [AttributeNames.RESOURCE_NAME]: `${ className }.${
-                    String(methodName) }`,
-                ...(pkgName ? { [AttributeNames.RESOURCE_NAME]: pkgName } : {}),
-                [AttributeNames.COMPONENT]: componentName,
-            }, opts.tags || {});
+            const attributes = Object.assign(
+                {
+                    [AttributeNames.SPAN_KIND]: opts.kind,
+                    [AttributeNames.RESOURCE_NAME]: `${className}.${String(
+                        methodName,
+                    )}`,
+                    ...(pkgName
+                        ? { [AttributeNames.RESOURCE_NAME]: pkgName }
+                        : {}),
+                    [AttributeNames.COMPONENT]: componentName,
+                },
+                opts.tags || {},
+            );
             const span = tracerInstance.startSpan(SpanNames.METHOD_CALL, {
                 attributes,
-                kind: opts.kind === TraceKind.CLIENT
-                    ? SpanKind.CLIENT
-                    : SpanKind.SERVER,
+                kind:
+                    opts.kind === TraceKind.CLIENT
+                        ? SpanKind.CLIENT
+                        : SpanKind.SERVER,
             });
 
             try {
@@ -140,8 +146,9 @@ export function traced(options?: Partial<TracedOptions>) {
 
                 if (result && result.then) {
                     // noinspection CommaExpressionJS
-                    return result.then((res: any) => (span.end(), res))
-                    .catch((err: any) => handleError(span, err));
+                    return result
+                        .then((res: any) => (span.end(), res))
+                        .catch((err: any) => handleError(span, err));
                 }
 
                 span.end();
