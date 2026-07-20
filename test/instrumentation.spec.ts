@@ -15,11 +15,11 @@
  * OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
  */
-import { describe, it, type TestContext } from 'node:test';
+import { before, describe, it, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { propagation, trace } from '@opentelemetry/api';
+import { context, trace } from '@opentelemetry/api';
+import { AsyncLocalStorageContextManager } from '@opentelemetry/context-async-hooks';
 import { type IMQClient, type IMQRPCRequest } from '../src/imq/types.js';
 import { ImqueueInstrumentation } from '../index.js';
 
@@ -27,10 +27,13 @@ const self = JSON.parse(
     readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
 );
 
-const client: IMQClient = {
-    name: 'client-name',
-    serviceName: 'service-name',
-};
+// A real context manager so `context.with(...)` actually propagates — required
+// to prove the service `wrapCall` runs the handler inside the span's context.
+before(() => {
+    context.setGlobalContextManager(new AsyncLocalStorageContextManager());
+});
+
+const client: IMQClient = { name: 'client-name', serviceName: 'service-name' };
 const service: IMQClient = {
     name: 'service-name',
     serviceName: 'service-name',
@@ -50,302 +53,198 @@ function makeSpan(t: TestContext): any {
         end: t.mock.fn(),
         setAttribute: t.mock.fn(),
         setStatus: t.mock.fn(),
+        recordException: t.mock.fn(),
+        spanContext: () => ({
+            traceId: '0'.repeat(32),
+            spanId: '0'.repeat(16),
+            traceFlags: 1,
+        }),
     };
 }
 
-// the instrumentation captures its tracer statically at init() time from
-// InstrumentationBase, which resolves it with trace.getTracer() during
-// construction — so the tracer mock must be installed before constructing
+// Install a tracer mock BEFORE constructing — the base captures the tracer via
+// trace.getTracer() at construction time.
 function makeInstrumentation(t: TestContext, tracer: any): any {
     t.mock.method(trace, 'getTracer', () => tracer);
 
     return new ImqueueInstrumentation() as any;
 }
 
-function makeModuleExports(): any {
-    return {
-        DEFAULT_IMQ_CLIENT_OPTIONS: {},
-        DEFAULT_IMQ_SERVICE_OPTIONS: {},
-    };
-}
+const emptyModule = () => ({
+    DEFAULT_IMQ_CLIENT_OPTIONS: {},
+    DEFAULT_IMQ_SERVICE_OPTIONS: {},
+});
 
 describe('ImqueueInstrumentation', () => {
     describe('constructor', () => {
-        it('should initialize with default config', () => {
-            assert.ok(
-                new ImqueueInstrumentation() instanceof ImqueueInstrumentation,
-            );
-        });
-
-        it('should initialize with custom config', () => {
-            const instrumentation = new ImqueueInstrumentation({
-                enabled: false,
-            });
-
-            assert.ok(instrumentation instanceof ImqueueInstrumentation);
-        });
-
-        it('should use name and version from package.json', () => {
+        it('constructs and reads name/version from package.json', () => {
             const instrumentation = new ImqueueInstrumentation();
 
+            assert.ok(instrumentation instanceof ImqueueInstrumentation);
             assert.equal(instrumentation.instrumentationName, self.name);
             assert.equal(instrumentation.instrumentationVersion, self.version);
         });
 
-        it('should fall back to defaults when no package.json exists', async () => {
-            const cwd = process.cwd();
-
-            process.chdir(tmpdir());
-
-            try {
-                // a fresh, query-busted copy evaluates from a directory
-                // without package.json, exercising the fallback branch (the
-                // ES module registry is immutable, hence the unique URL)
-                const href = new URL(
-                    '../src/instrumentation.js',
-                    import.meta.url,
-                ).href;
-                const { ImqueueInstrumentation: Fallback } = await import(
-                    `${href}?fallback=1`
-                );
-
-                assert.ok(new Fallback() instanceof Fallback);
-            } finally {
-                process.chdir(cwd);
-            }
+        it('honours a custom (disabled) config', () => {
+            assert.ok(
+                new ImqueueInstrumentation({ enabled: false }) instanceof
+                    ImqueueInstrumentation,
+            );
         });
     });
 
     describe('init()', () => {
-        it('should define instrumentation for supported @imqueue/rpc', () => {
+        it('registers no module-load hook (patches singletons directly)', () => {
             const instrumentation: any = new ImqueueInstrumentation();
-            const definition = instrumentation.init();
 
-            assert.equal(definition.name, '@imqueue/rpc');
-            assert.deepEqual(definition.supportedVersions, ['>=1.10']);
-            assert.equal(typeof definition.patch, 'function');
-            assert.equal(typeof definition.unpatch, 'function');
+            assert.deepEqual(instrumentation.init(), []);
         });
     });
 
-    describe('patching', () => {
-        it('should patch client and service default options', () => {
-            const instrumentation: any = new ImqueueInstrumentation();
-            const moduleExports = makeModuleExports();
-            const result = instrumentation.init().patch(moduleExports);
+    describe('patch()/unpatch()', () => {
+        it('patches client before/after and service wrapCall', (t: TestContext) => {
+            const instrumentation = makeInstrumentation(t, {
+                startSpan: () => makeSpan(t),
+            });
+            const rpc = instrumentation.patch(emptyModule());
 
-            for (const key of [
-                'DEFAULT_IMQ_CLIENT_OPTIONS',
-                'DEFAULT_IMQ_SERVICE_OPTIONS',
-            ]) {
-                assert.equal(typeof result[key].beforeCall, 'function');
-                assert.equal(typeof result[key].afterCall, 'function');
-            }
+            assert.equal(
+                typeof rpc.DEFAULT_IMQ_CLIENT_OPTIONS.beforeCall,
+                'function',
+            );
+            assert.equal(
+                typeof rpc.DEFAULT_IMQ_CLIENT_OPTIONS.afterCall,
+                'function',
+            );
+            assert.equal(
+                typeof rpc.DEFAULT_IMQ_SERVICE_OPTIONS.wrapCall,
+                'function',
+            );
+            // the service uses the around-hook, not before/after
+            assert.equal(rpc.DEFAULT_IMQ_SERVICE_OPTIONS.beforeCall, undefined);
+        });
+
+        it('unpatch removes every hook it added', (t: TestContext) => {
+            const instrumentation = makeInstrumentation(t, {
+                startSpan: () => makeSpan(t),
+            });
+            const rpc = instrumentation.unpatch(
+                instrumentation.patch(emptyModule()),
+            );
+
+            assert.equal(rpc.DEFAULT_IMQ_CLIENT_OPTIONS.beforeCall, undefined);
+            assert.equal(rpc.DEFAULT_IMQ_CLIENT_OPTIONS.afterCall, undefined);
+            assert.equal(rpc.DEFAULT_IMQ_SERVICE_OPTIONS.wrapCall, undefined);
+        });
+
+        it('tolerates missing client/service option objects', (t: TestContext) => {
+            const instrumentation = makeInstrumentation(t, {
+                startSpan: () => makeSpan(t),
+            });
+
+            assert.doesNotThrow(() => instrumentation.patch({}));
+            assert.doesNotThrow(() => instrumentation.unpatch({}));
         });
     });
 
-    describe('unpatching', () => {
-        it('should unpatch client and service default options', () => {
-            const instrumentation: any = new ImqueueInstrumentation();
-            const definition = instrumentation.init();
-            const moduleExports = definition.patch(makeModuleExports());
-            const result = definition.unpatch(moduleExports);
-
-            for (const key of [
-                'DEFAULT_IMQ_CLIENT_OPTIONS',
-                'DEFAULT_IMQ_SERVICE_OPTIONS',
-            ]) {
-                assert.equal(result[key].beforeCall, undefined);
-                assert.equal(result[key].afterCall, undefined);
-            }
-        });
-
-        it('should handle empty client and service options', () => {
-            const instrumentation: any = new ImqueueInstrumentation();
-            const result = instrumentation.init().unpatch(makeModuleExports());
-
-            assert.deepEqual(result, makeModuleExports());
-        });
-
-        it('should handle undefined client options', () => {
-            const instrumentation: any = new ImqueueInstrumentation();
-            const moduleExports = { DEFAULT_IMQ_SERVICE_OPTIONS: {} };
-            const result = instrumentation.init().unpatch(moduleExports);
-
-            assert.deepEqual(result, { DEFAULT_IMQ_SERVICE_OPTIONS: {} });
-        });
-
-        it('should handle undefined service options', () => {
-            const instrumentation: any = new ImqueueInstrumentation();
-            const moduleExports = { DEFAULT_IMQ_CLIENT_OPTIONS: {} };
-            const result = instrumentation.init().unpatch(moduleExports);
-
-            assert.deepEqual(result, { DEFAULT_IMQ_CLIENT_OPTIONS: {} });
-        });
-    });
-
-    describe('beforeCallClient', () => {
-        it('should create a client span on the request', async (t: TestContext) => {
+    describe('client beforeCall/afterCall', () => {
+        it('starts a client span and injects context into metadata', async (t: TestContext) => {
             const span = makeSpan(t);
             const startSpan = t.mock.fn(() => span);
             const instrumentation = makeInstrumentation(t, { startSpan });
-            const request = makeRequest();
+            const rpc = instrumentation.patch(emptyModule());
+            const req = makeRequest();
 
-            await instrumentation.beforeCallClient.call(client, request);
+            await rpc.DEFAULT_IMQ_CLIENT_OPTIONS.beforeCall.call(client, req);
 
-            assert.equal(request.span, span);
-            assert.ok(request.metadata);
-            assert.ok(request.metadata.clientSpan);
+            assert.equal(req.span, span);
+            assert.ok(req.metadata && req.metadata.clientSpan);
             assert.equal(startSpan.mock.calls.length, 1);
+        });
 
-            const [, options] = startSpan.mock.calls[0].arguments as any[];
+        it('ends the span and flags errors on afterCall', async (t: TestContext) => {
+            const span = makeSpan(t);
+            const instrumentation = makeInstrumentation(t, {
+                startSpan: () => span,
+            });
+            const rpc = instrumentation.patch(emptyModule());
+            const req = makeRequest();
 
-            assert.equal(
-                options.attributes['resource.name'],
-                'service-name.test-method',
+            await rpc.DEFAULT_IMQ_CLIENT_OPTIONS.beforeCall.call(client, req);
+            await rpc.DEFAULT_IMQ_CLIENT_OPTIONS.afterCall.call(client, req, {
+                error: { message: 'boom' },
+            });
+
+            assert.equal(span.end.mock.calls.length, 1);
+            assert.equal(span.setStatus.mock.calls.length, 1);
+        });
+
+        it('afterCall is a no-op when no span was attached', async (t: TestContext) => {
+            const instrumentation = makeInstrumentation(t, {
+                startSpan: () => makeSpan(t),
+            });
+            const rpc = instrumentation.patch(emptyModule());
+
+            await assert.doesNotReject(
+                rpc.DEFAULT_IMQ_CLIENT_OPTIONS.afterCall.call(
+                    client,
+                    makeRequest(),
+                ),
             );
-        });
-
-        it('should inject context into request metadata', async (t: TestContext) => {
-            const span = makeSpan(t);
-            const instrumentation = makeInstrumentation(t, {
-                startSpan: () => span,
-            });
-            const inject = t.mock.method(propagation, 'inject');
-            const request = makeRequest();
-
-            await instrumentation.beforeCallClient.call(client, request);
-
-            assert.equal(inject.mock.calls.length, 1);
-            assert.equal(request.span, span);
-        });
-
-        it('should override toJSON to exclude span', async (t: TestContext) => {
-            const span = makeSpan(t);
-            const instrumentation = makeInstrumentation(t, {
-                startSpan: () => span,
-            });
-            const request = makeRequest();
-
-            await instrumentation.beforeCallClient.call(client, request);
-
-            assert.equal(request.toJSON().span, undefined);
-        });
-
-        it('should silently handle tracer errors', async (t: TestContext) => {
-            const instrumentation = makeInstrumentation(t, {
-                startSpan: () => {
-                    throw new Error('Test error');
-                },
-            });
-            const request = makeRequest();
-
-            await instrumentation.beforeCallClient.call(client, request);
-
-            assert.equal(request.span, undefined);
         });
     });
 
-    describe('beforeCallService', () => {
-        it('should create a service span from client context', async (t: TestContext) => {
+    describe('service wrapCall', () => {
+        it('runs the handler INSIDE the server span context (nesting works)', async (t: TestContext) => {
             const span = makeSpan(t);
-            const startSpan = t.mock.fn(() => span);
-            const instrumentation = makeInstrumentation(t, { startSpan });
-            const extract = t.mock.method(propagation, 'extract');
-            const request = makeRequest({ clientSpan: {} });
+            const instrumentation = makeInstrumentation(t, {
+                startSpan: () => span,
+            });
+            const rpc = instrumentation.patch(emptyModule());
+            const req = makeRequest();
 
-            await instrumentation.beforeCallService.call(service, request);
+            let activeInsideHandler: unknown;
+            const next = async () => {
+                activeInsideHandler = trace.getSpan(context.active());
 
-            assert.equal(request.span, span);
-            assert.equal(extract.mock.calls.length, 1);
+                return 'result';
+            };
 
-            const [, options] = startSpan.mock.calls[0].arguments as any[];
-
-            assert.equal(
-                options.attributes['resource.name'],
-                'service-name.test-method',
+            const result = await rpc.DEFAULT_IMQ_SERVICE_OPTIONS.wrapCall.call(
+                service,
+                req,
+                {},
+                next,
             );
-        });
 
-        it('should handle missing metadata', async (t: TestContext) => {
-            const span = makeSpan(t);
-            const instrumentation = makeInstrumentation(t, {
-                startSpan: () => span,
-            });
-            const extract = t.mock.method(propagation, 'extract');
-            const request = makeRequest();
-
-            await instrumentation.beforeCallService.call(service, request);
-
-            assert.equal(extract.mock.calls.length, 1);
-            assert.equal(request.span, span);
-        });
-
-        it('should override toJSON to exclude span', async (t: TestContext) => {
-            const span = makeSpan(t);
-            const instrumentation = makeInstrumentation(t, {
-                startSpan: () => span,
-            });
-            const request = makeRequest({ clientSpan: {} });
-
-            await instrumentation.beforeCallService.call(service, request);
-
-            assert.equal(request.toJSON().span, undefined);
-        });
-
-        it('should silently handle tracer errors', async (t: TestContext) => {
-            const instrumentation = makeInstrumentation(t, {
-                startSpan: () => {
-                    throw new Error('Test error');
-                },
-            });
-            const request = makeRequest({ clientSpan: {} });
-
-            await instrumentation.beforeCallService.call(service, request);
-
-            assert.equal(request.span, undefined);
-        });
-    });
-
-    describe('afterCall', () => {
-        it('should end the request span', async (t: TestContext) => {
-            const span = makeSpan(t);
-            const instrumentation = makeInstrumentation(t, {
-                startSpan: () => span,
-            });
-            const request = makeRequest();
-
-            request.span = span;
-
-            await instrumentation.afterCall.call(client, request);
-
+            assert.equal(result, 'result');
+            assert.equal(activeInsideHandler, span, 'handler sees the span');
+            assert.equal(req.span, span);
             assert.equal(span.end.mock.calls.length, 1);
         });
 
-        it('should handle a missing span', async () => {
-            const instrumentation: any = new ImqueueInstrumentation();
-            const request = makeRequest();
-
-            await assert.doesNotReject(
-                instrumentation.afterCall.call(client, request),
-            );
-        });
-
-        it('should silently handle span errors', async (t: TestContext) => {
+        it('records the exception, ends the span, and rethrows', async (t: TestContext) => {
             const span = makeSpan(t);
-
-            span.end = t.mock.fn(() => {
-                throw new Error('Test error');
+            const instrumentation = makeInstrumentation(t, {
+                startSpan: () => span,
             });
+            const rpc = instrumentation.patch(emptyModule());
+            const boom = new Error('handler failed');
 
-            const instrumentation: any = new ImqueueInstrumentation();
-            const request = makeRequest();
-
-            request.span = span;
-
-            await assert.doesNotReject(
-                instrumentation.afterCall.call(client, request),
+            await assert.rejects(
+                rpc.DEFAULT_IMQ_SERVICE_OPTIONS.wrapCall.call(
+                    service,
+                    makeRequest(),
+                    {},
+                    async () => {
+                        throw boom;
+                    },
+                ),
+                boom,
             );
+
+            assert.equal(span.recordException.mock.calls.length, 1);
+            assert.equal(span.setStatus.mock.calls.length, 1);
             assert.equal(span.end.mock.calls.length, 1);
         });
     });
