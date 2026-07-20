@@ -28,7 +28,20 @@ export interface IMQRPCRequest {
     metadata?: any;
 }
 
-export interface IMQServiceOptions {
+export interface IMQRPCResponse {
+    data?: any;
+    error?: any;
+    request?: IMQRPCRequest;
+}
+
+/**
+ * The subset of `@imqueue/rpc`'s default option singletons this instrumentation
+ * mutates. `beforeCall`/`afterCall` are used on the client; `wrapCall` (the
+ * around-hook) is used on the service so the handler runs inside the span's
+ * OpenTelemetry context.
+ */
+export interface IMQCallHooks {
     beforeCall?: Function;
     afterCall?: Function;
+    wrapCall?: Function;
 }
