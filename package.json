@@ -38,7 +38,7 @@
   "bugs": {
     "url": "https://github.com/imqueue/opentelemetry-instrumentation-imqueue/issues"
   },
-  "homepage": "https://github.com/imqueue/opentelemetry-instrumentation-imqueue",
+  "homepage": "https://imqueue.org/",
   "dependencies": {
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/instrumentation": "^0.220.0"
