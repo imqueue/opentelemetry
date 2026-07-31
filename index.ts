@@ -56,9 +56,15 @@
  *
  * @packageDocumentation
  */
-import { readFileSync } from 'node:fs';
-import { type Span, trace, SpanKind, SpanStatusCode } from '@opentelemetry/api';
-import * as path from 'path';
+// KEEP THIS IMPORT FIRST. A `@packageDocumentation` comment only reaches
+// api-extractor if it survives into the emitted index.d.ts, and tsc carries a
+// leading comment only as far as the statement it is attached to. This import
+// has `type` members, so it is emitted; the other three are value-only and are
+// elided, which silently drops the comment with them. That is not a
+// hypothetical: the block above went missing from 3.3.0's declarations exactly
+// this way, leaving the published API-reference landing page with a generated
+// "opentelemetry-instrumentation-imqueue package" description instead of this
+// summary.
 import {
     SpanNames,
     TraceKind,
@@ -66,6 +72,9 @@ import {
     AttributeNames,
     type TraceAttributes,
 } from './src/index.js';
+import { readFileSync } from 'node:fs';
+import { type Span, trace, SpanKind, SpanStatusCode } from '@opentelemetry/api';
+import * as path from 'path';
 
 export * from './src/index.js';
 export { type IMQCallHooks } from './src/imq/types.js';
