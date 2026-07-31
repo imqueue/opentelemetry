@@ -19,6 +19,43 @@
  * purchase a proprietary commercial license. Please contact us at
  * <support@imqueue.com> to get commercial licensing options.
  */
+/**
+ * OpenTelemetry instrumentation for `@imqueue/rpc` — distributed traces across
+ * IMQ service calls, with no changes to service or client code.
+ *
+ * Register {@link ImqueueInstrumentation} once at start-up and every RPC made
+ * through `@imqueue/rpc` produces a CLIENT span on the calling side and a SERVER
+ * span on the handling side, linked into one trace. For anything the automatic
+ * spans do not cover there are two manual tools: the {@link traced} method
+ * decorator, and the {@link traceStart}/{@link traceEnd} pair for an arbitrary
+ * block of code.
+ *
+ * @remarks
+ * Trace context travels in the IMQ request metadata, so a call chain stays a
+ * single trace across processes and queues. The instrumentation works by
+ * mutating `@imqueue/rpc`'s exported default option singletons rather than by
+ * hooking module loading — see {@link ImqueueInstrumentation} for why that
+ * matters and what it implies.
+ *
+ * This package only *produces* spans. Exporting them is the host application's
+ * job: register a tracer provider from the OpenTelemetry SDK, or the spans go
+ * nowhere.
+ *
+ * @example
+ * ```typescript
+ * import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
+ * import { registerInstrumentations } from '@opentelemetry/instrumentation';
+ * import { ImqueueInstrumentation } from '@imqueue/opentelemetry-instrumentation-imqueue';
+ *
+ * new NodeTracerProvider().register();
+ *
+ * registerInstrumentations({
+ *     instrumentations: [new ImqueueInstrumentation()],
+ * });
+ * ```
+ *
+ * @packageDocumentation
+ */
 import { readFileSync } from 'node:fs';
 import { type Span, trace, SpanKind, SpanStatusCode } from '@opentelemetry/api';
 import * as path from 'path';
@@ -30,7 +67,8 @@ import {
     type TraceAttributes,
 } from './src/index.js';
 
-export * from './src/instrumentation.js';
+export * from './src/index.js';
+export { type IMQCallHooks } from './src/imq/types.js';
 
 const traces: { [name: string]: Span } = {};
 const componentName = 'imq';
@@ -38,24 +76,46 @@ const defaultTracerName = 'basic';
 
 // noinspection JSUnusedGlobalSymbols
 /**
- * Shorthand for making in-code traces. Starts datadog trace span with the
- * given name, and assigns it given tags (if passed).
+ * Starts a named span for tracing a block of code that no decorator can wrap,
+ * to be closed later by {@link traceEnd} with the same name.
+ *
+ * @remarks
+ * Spans started here are held in a module-level registry keyed by `name`, which
+ * is what lets {@link traceEnd} find one from an unrelated call site. Two
+ * consequences follow, and both matter:
+ *
+ * - A name may have only ONE span open at a time. Starting a second under a
+ *   live name throws rather than silently replacing it, since replacing would
+ *   leak the first span forever.
+ * - A span left unclosed is never exported. Prefer {@link traced}, or a
+ *   `try`/`finally` around the {@link traceEnd} call, wherever the block can
+ *   throw.
+ *
+ * The span is created standalone, NOT as a child of whatever span is currently
+ * active, and it is not made active for the code in between. Use it to time a
+ * region, not to parent the spans that region creates.
  *
  * @example
  * ```typescript
  * import {
- *  trace,
- *  traceEnd,
+ *     traceStart,
+ *     traceEnd,
  * } from '@imqueue/opentelemetry-instrumentation-imqueue';
  *
- * trace('my-trace');
- * // ... do some work
- * traceEnd('my-trace');
+ * traceStart('import-batch', { 'batch.size': String(rows.length) });
+ *
+ * try {
+ *     await importRows(rows);
+ * } finally {
+ *     traceEnd('import-batch');
+ * }
  * ```
  *
- * @param {string} name - trace name (datadog span name
- * @param {TraceAttributes} [tags] - datadog trace span tags, if passed
- * @param {string} tracerName
+ * @param name - span name, and the key {@link traceEnd} will close it by
+ * @param tags - attributes to set on the span at creation; values must be
+ *               strings
+ * @param tracerName - tracer to create the span with, `'basic'` by default
+ * @throws TypeError if a span under this name is already open
  */
 export function traceStart(
     name: string,
@@ -70,14 +130,21 @@ export function traceStart(
 
     traces[name] = trace
         .getTracer(tracerName || defaultTracerName)
-        .startSpan(name);
+        .startSpan(name, tags ? { attributes: tags } : undefined);
 }
 
 // noinspection JSUnusedGlobalSymbols
 /**
- * Shorthand for finishing datadog trace span.
+ * Ends the span {@link traceStart} opened under this name and releases it, so
+ * the name can be reused.
  *
- * @param {string} name
+ * @remarks
+ * An unknown or already-closed name is a silent no-op, not an error — safe to
+ * call from a `finally` block without first checking whether the span was ever
+ * started. The flip side is that a misspelled name fails silently and leaves the
+ * real span open and unexported.
+ *
+ * @param name - the name the span was started under
  */
 export function traceEnd(name: string) {
     if (traces[name]) {
@@ -102,8 +169,49 @@ try {
 
 // noinspection JSUnusedGlobalSymbols
 /**
- * Decorator factory, which return decorator function allowing to add tracing to
- * decorated method calls.
+ * Builds a method decorator that wraps each call to the decorated method in its
+ * own span, ending it when the method returns — or when the promise it returned
+ * settles.
+ *
+ * @remarks
+ * Use this for work worth seeing in a trace that is not itself an RPC, so the
+ * automatic client/server spans do not already cover it: a cache rebuild, a
+ * report query, a third-party call.
+ *
+ * Async methods are handled: a returned thenable keeps the span open until it
+ * settles, so the span duration reflects the real work rather than the time to
+ * return a promise. A rejection, or a synchronous throw, records the error on
+ * the span, marks it `ERROR`, ends it, and re-throws — the decorator never
+ * swallows a failure.
+ *
+ * Every span it creates is named `method.call`; the decorated method is
+ * identified by the `resource.name` attribute (`ClassName.methodName`), not by
+ * the span name. The span is not made the active context, so spans created
+ * *inside* the method do not nest under it — for nesting, rely on
+ * {@link ImqueueInstrumentation}, which does establish context for RPC handlers.
+ *
+ * @example
+ * ```typescript
+ * import { traced, TraceKind } from '@imqueue/opentelemetry-instrumentation-imqueue';
+ *
+ * class Reports {
+ *     @traced()
+ *     public async rebuild(day: string): Promise<void> {
+ *         // span stays open until this promise settles
+ *     }
+ *
+ *     @traced({ kind: TraceKind.CLIENT, tags: { 'peer.service': 'billing' } })
+ *     public async fetchInvoices(userId: string): Promise<Invoice[]> {
+ *         return this.http.get(`/invoices/${ userId }`);
+ *     }
+ * }
+ * ```
+ *
+ * @param options - span kind, extra attributes and tracer name. `kind` defaults
+ *                  to {@link TraceKind.SERVER}; `tracerName` defaults to
+ *                  `'basic'`. Attributes given in `tags` are applied last, so
+ *                  they override the ones set automatically.
+ * @returns a method decorator to apply to the methods you want traced
  */
 export function traced(options?: Partial<TracedOptions>) {
     return (
@@ -129,8 +237,13 @@ export function traced(options?: Partial<TracedOptions>) {
                     [AttributeNames.RESOURCE_NAME]: `${className}.${String(
                         methodName,
                     )}`,
+                    // The host package name identifies the SERVICE. It used to
+                    // be written to RESOURCE_NAME instead, as a second key in
+                    // this same literal — so it silently overwrote the
+                    // ClassName.methodName above and every traced method in a
+                    // process reported the same resource.
                     ...(pkgName
-                        ? { [AttributeNames.RESOURCE_NAME]: pkgName }
+                        ? { [AttributeNames.SERVICE_NAME]: pkgName }
                         : {}),
                     [AttributeNames.COMPONENT]: componentName,
                 },
@@ -165,11 +278,12 @@ export function traced(options?: Partial<TracedOptions>) {
 }
 
 /**
- * Handles error gracefully, finishing tracing span before throwing
+ * Records an error on a span, marks the span failed, ends it, and re-throws the
+ * original error unchanged — so tracing never alters what the caller sees.
  *
- * @param {Span} span
- * @param {any} err
- * @throws {any}
+ * @param span - the span to fail and close
+ * @param err - the error to record and re-throw
+ * @throws the `err` it was given, always
  */
 function handleError(span: Span, err: any) {
     span.setAttribute(AttributeNames.ERROR_MESSAGE, err);

@@ -19,8 +19,24 @@
  * purchase a proprietary commercial license. Please contact us at
  * <support@imqueue.com> to get commercial licensing options.
  */
+/**
+ * The span names this package emits. There are only three, and they identify the
+ * KIND of operation, not which method ran — the specific method is carried by
+ * the `resource.name` attribute ({@link AttributeNames.RESOURCE_NAME}).
+ *
+ * @remarks
+ * That split is what makes the traces groupable: a backend can aggregate all
+ * `imq.request` spans as "outbound RPC" and still break them down by resource.
+ * It also means filtering a dashboard by span name alone will never isolate a
+ * single method.
+ */
 export enum SpanNames {
+    /** A service handling an inbound RPC — the SERVER side. */
     IMQ_RESPONSE = 'imq.response',
+
+    /** A client issuing an RPC and awaiting the reply — the CLIENT side. */
     IMQ_REQUEST = 'imq.request',
+
+    /** A method wrapped with the `traced` decorator. */
     METHOD_CALL = 'method.call',
 }

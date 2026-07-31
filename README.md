@@ -14,7 +14,7 @@ This library provides a clean way to integrate
 ## Install
 
 ~~~bash
-npm i --save @imqueue/opentelemtry-instrumentation-imqueue
+npm i --save @imqueue/opentelemetry-instrumentation-imqueue
 ~~~ 
 
 ## Usage & API

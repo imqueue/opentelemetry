@@ -19,7 +19,14 @@
  * purchase a proprietary commercial license. Please contact us at
  * <support@imqueue.com> to get commercial licensing options.
  */
+/**
+ * Which side of a call a span describes. Written to the `span.kind` attribute,
+ * and mapped onto OpenTelemetry's own `SpanKind` when the span is created.
+ */
 export enum TraceKind {
+    /** Work this process performs on someone else's behalf — the default. */
     SERVER = 'server',
+
+    /** An outbound call this process makes and waits on. */
     CLIENT = 'client',
 }
