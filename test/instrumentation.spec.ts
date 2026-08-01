@@ -27,6 +27,16 @@ const self = JSON.parse(
     readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
 );
 
+// The instrumentation scope name lands on `otel.scope.name` for every span this
+// instrumentation emits, so it is a user-visible identifier that dashboards,
+// saved queries and sampling rules filter on. It is pinned to a literal here on
+// purpose: asserting it against package.json — which is where the runtime value
+// is read from — passes for ANY name, so a package rename would silently rewrite
+// every user's telemetry with a green test suite. Changing this literal must be
+// a deliberate act, in step with package.json's `name` and the fallback in
+// src/instrumentation.ts.
+const SCOPE_NAME = '@imqueue/opentelemetry';
+
 // A real context manager so `context.with(...)` actually propagates — required
 // to prove the service `wrapCall` runs the handler inside the span's context.
 before(() => {
@@ -77,12 +87,16 @@ const emptyModule = () => ({
 
 describe('ImqueueInstrumentation', () => {
     describe('constructor', () => {
-        it('constructs and reads name/version from package.json', () => {
+        it('constructs with the pinned scope name and the package version', () => {
             const instrumentation = new ImqueueInstrumentation();
 
             assert.ok(instrumentation instanceof ImqueueInstrumentation);
-            assert.equal(instrumentation.instrumentationName, self.name);
+            assert.equal(instrumentation.instrumentationName, SCOPE_NAME);
             assert.equal(instrumentation.instrumentationVersion, self.version);
+        });
+
+        it('keeps package.json in step with the pinned scope name', () => {
+            assert.equal(self.name, SCOPE_NAME);
         });
 
         it('honours a custom (disabled) config', () => {

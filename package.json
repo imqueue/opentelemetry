@@ -1,15 +1,23 @@
 {
-  "name": "@imqueue/opentelemetry-instrumentation-imqueue",
+  "name": "@imqueue/opentelemetry",
   "version": "3.3.1",
   "description": "This module provides OpenTelemetry instrumentation for @imqueue",
   "keywords": [
     "imqueue",
+    "imq",
     "trace",
     "tracing",
     "opentelemetry",
+    "otel",
+    "apm",
+    "observability",
+    "rpc",
     "integration",
     "instrumentation"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "clean-compiled": "npm run clean-js && npm run clean-typedefs && npm run clean-maps",
     "build": "npm run clean-compiled && tsc",
@@ -33,10 +41,10 @@
   "license": "GPL-3.0-only",
   "repository": {
     "type": "git",
-    "url": "git://github.com/imqueue/opentelemetry-instrumentation-imqueue.git"
+    "url": "git+https://github.com/imqueue/opentelemetry.git"
   },
   "bugs": {
-    "url": "https://github.com/imqueue/opentelemetry-instrumentation-imqueue/issues"
+    "url": "https://github.com/imqueue/opentelemetry/issues"
   },
   "homepage": "https://imqueue.org/",
   "dependencies": {

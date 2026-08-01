@@ -45,7 +45,7 @@
  * ```typescript
  * import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
  * import { registerInstrumentations } from '@opentelemetry/instrumentation';
- * import { ImqueueInstrumentation } from '@imqueue/opentelemetry-instrumentation-imqueue';
+ * import { ImqueueInstrumentation } from '@imqueue/opentelemetry';
  *
  * new NodeTracerProvider().register();
  *
@@ -63,8 +63,7 @@
 // elided, which silently drops the comment with them. That is not a
 // hypothetical: the block above went missing from 3.3.0's declarations exactly
 // this way, leaving the published API-reference landing page with a generated
-// "opentelemetry-instrumentation-imqueue package" description instead of this
-// summary.
+// "opentelemetry package" description instead of this summary.
 import {
     SpanNames,
     TraceKind,
@@ -109,7 +108,7 @@ const defaultTracerName = 'basic';
  * import {
  *     traceStart,
  *     traceEnd,
- * } from '@imqueue/opentelemetry-instrumentation-imqueue';
+ * } from '@imqueue/opentelemetry';
  *
  * traceStart('import-batch', { 'batch.size': String(rows.length) });
  *
@@ -201,7 +200,7 @@ try {
  *
  * @example
  * ```typescript
- * import { traced, TraceKind } from '@imqueue/opentelemetry-instrumentation-imqueue';
+ * import { traced, TraceKind } from '@imqueue/opentelemetry';
  *
  * class Reports {
  *     @traced()

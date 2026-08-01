@@ -34,9 +34,9 @@ jobs:
     permissions:
       contents: write
     with:
-      package: '@imqueue/opentelemetry-instrumentation-imqueue'
+      package: '@imqueue/opentelemetry'
       tag: ${{ inputs.tag || '' }}
       dry-run: ${{ inputs.dry-run || false }}
       blurb: >-
-        `@imqueue/opentelemetry-instrumentation-imqueue` — OpenTelemetry instrumentation for
+        `@imqueue/opentelemetry` — OpenTelemetry instrumentation for
         @imqueue. Part of the @imqueue framework for Node.js & TypeScript microservices.

@@ -40,7 +40,13 @@ import {
 const PACKAGE_NAME = '@imqueue/rpc';
 const COMPONENT_NAME = 'imq';
 
-let instrumentationName = '@imqueue/opentelemetry-instrumentation-imqueue';
+// This is the OpenTelemetry instrumentation SCOPE NAME, not just a label: it
+// reaches `otel.scope.name` on every span this instrumentation emits (see the
+// `super()` call below). It follows the package name, so renaming the package
+// renames the scope — keep this literal in step with package.json's `name` or a
+// deployment that cannot read package.json reports a different scope than the
+// rest. `test/instrumentation.spec.ts` pins the expected value.
+let instrumentationName = '@imqueue/opentelemetry';
 let instrumentationVersion = '0.0.0';
 
 try {
@@ -100,7 +106,7 @@ export interface RpcModule {
  * ```typescript
  * import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
  * import { registerInstrumentations } from '@opentelemetry/instrumentation';
- * import { ImqueueInstrumentation } from '@imqueue/opentelemetry-instrumentation-imqueue';
+ * import { ImqueueInstrumentation } from '@imqueue/opentelemetry';
  *
  * new NodeTracerProvider().register();
  *
