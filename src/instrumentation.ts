@@ -19,6 +19,7 @@ import {
 } from '@opentelemetry/instrumentation';
 import {
     context,
+    diag,
     propagation,
     SpanKind,
     SpanStatusCode,
@@ -38,6 +39,35 @@ import {
 } from './imq/types.js';
 
 const PACKAGE_NAME = '@imqueue/rpc';
+
+/**
+ * Modules each instrumentation has already hooked, so a patch is idempotent and
+ * {@link ImqueueInstrumentation.enable} can tell "nothing patched yet" from "the
+ * caller already patched the right instance".
+ *
+ * Module-level rather than an instance field on purpose: `InstrumentationBase`
+ * calls `enable()` from its own constructor, which runs before a subclass field
+ * initializer would — so a field here is still `undefined` the first time
+ * `enable()` reads it.
+ */
+const patchedModules = new WeakMap<ImqueueInstrumentation, Set<RpcModule>>();
+
+/** The patched-module set for one instrumentation, created on first use. */
+function patchedFor(
+    instrumentation: ImqueueInstrumentation,
+): Set<RpcModule> {
+    const existing = patchedModules.get(instrumentation);
+
+    if (existing) {
+        return existing;
+    }
+
+    const created = new Set<RpcModule>();
+
+    patchedModules.set(instrumentation, created);
+
+    return created;
+}
 const COMPONENT_NAME = 'imq';
 
 // This is the OpenTelemetry instrumentation SCOPE NAME, not just a label: it
@@ -139,18 +169,38 @@ export class ImqueueInstrumentation extends InstrumentationBase {
      * its default options.
      *
      * @remarks
-     * A no-op if `@imqueue/rpc` cannot be resolved — nothing throws, so an app
-     * that registers this instrumentation without using IMQ still starts. That
-     * also means a silent failure looks identical to success from here; if no
-     * spans appear, an unresolvable or duplicated `rpc` install is the first
-     * thing to check.
+     * Does nothing when the module has already been patched — which is the case
+     * when the instrumentation came from {@link imqueueInstrumentation}, whose
+     * whole purpose is to hand over the same module instance the application
+     * imported.
+     *
+     * Resolution here is a synchronous `require`, and that is the one thing this
+     * cannot always get right. Under plain Node an ESM package required this way
+     * is the very module the application imported, so the hooks land where they
+     * are needed. Under a loader that evaluates ESM and CJS separately — `tsx`,
+     * for one — it is a *second* instance, and patching it traces nothing while
+     * looking like success. This used to be silent; it now warns, and
+     * {@link imqueueInstrumentation} avoids the problem entirely.
      */
     public override enable(): void {
+        if (patchedFor(this).size > 0) {
+            return;
+        }
+
         const rpc = this.resolveRpc();
 
-        if (rpc) {
-            this.patch(rpc);
+        if (!rpc) {
+            diag.warn(
+                `${instrumentationName}: could not resolve ${PACKAGE_NAME}; ` +
+                    'no IMQ spans will be produced. Construct the ' +
+                    'instrumentation with `await imqueueInstrumentation()` so ' +
+                    "the application's own module instance is used.",
+            );
+
+            return;
         }
+
+        this.patch(rpc);
     }
 
     /**
@@ -174,10 +224,16 @@ export class ImqueueInstrumentation extends InstrumentationBase {
      * It is public so a test, or an app whose `rpc` copy this cannot resolve, can
      * pass the module in explicitly.
      *
+     * Idempotent: patching the same module twice attaches the hooks once.
+     *
      * @param rpc - module whose default option singletons should be hooked
      * @returns the same object, hooks applied in place
      */
     public patch(rpc: RpcModule): RpcModule {
+        if (patchedFor(this).has(rpc)) {
+            return rpc;
+        }
+
         const { client, service } = this.hooks();
 
         if (rpc.DEFAULT_IMQ_CLIENT_OPTIONS) {
@@ -187,6 +243,8 @@ export class ImqueueInstrumentation extends InstrumentationBase {
         if (rpc.DEFAULT_IMQ_SERVICE_OPTIONS) {
             Object.assign(rpc.DEFAULT_IMQ_SERVICE_OPTIONS, service);
         }
+
+        patchedFor(this).add(rpc);
 
         return rpc;
     }
@@ -205,6 +263,8 @@ export class ImqueueInstrumentation extends InstrumentationBase {
      * @returns the same object, hooks removed in place
      */
     public unpatch(rpc: RpcModule): RpcModule {
+        patchedFor(this).delete(rpc);
+
         for (const options of [
             rpc.DEFAULT_IMQ_CLIENT_OPTIONS,
             rpc.DEFAULT_IMQ_SERVICE_OPTIONS,
@@ -368,4 +428,46 @@ function keepSpanUnserialized(req: IMQRPCRequest): void {
 
 function errorMessage(error: any): string {
     return typeof error === 'string' ? error : error?.message;
+}
+
+/**
+ * Build an {@link ImqueueInstrumentation} already bound to the application's own
+ * `@imqueue/rpc`, ready to drop into an `instrumentations` array beside any
+ * other instrumentation:
+ *
+ * ```typescript
+ * const sdk = new NodeSDK({
+ *     instrumentations: [
+ *         new PgInstrumentation(),
+ *         await imqueueInstrumentation(),
+ *     ],
+ * });
+ * ```
+ *
+ * @remarks
+ * Prefer this over `new ImqueueInstrumentation()` in an ESM application.
+ *
+ * This instrumentation works by patching `@imqueue/rpc`'s mutable default option
+ * singletons, so it has to hold *the same module object the application holds*.
+ * `enable()` can only reach for that synchronously, with `require`, and that is
+ * not always the same instance: under a loader which evaluates ESM and CJS
+ * separately — `tsx`, for one — `require` yields a second copy of the module,
+ * the hooks are attached to singletons nobody calls, and the result is silence
+ * rather than an error. Resolving through `import()` here asks the loader the
+ * application itself used, so the instance always matches.
+ *
+ * The returned instrumentation is already patched, and `enable()` will not patch
+ * it again, so registering it costs nothing extra.
+ *
+ * @param config - standard OpenTelemetry instrumentation config
+ * @returns an instrumentation hooked to the caller's `@imqueue/rpc`
+ */
+export async function imqueueInstrumentation(
+    config: InstrumentationConfig = {},
+): Promise<ImqueueInstrumentation> {
+    const instrumentation = new ImqueueInstrumentation(config);
+
+    instrumentation.patch((await import(PACKAGE_NAME)) as unknown as RpcModule);
+
+    return instrumentation;
 }
