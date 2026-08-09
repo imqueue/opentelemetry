@@ -53,9 +53,7 @@ const PACKAGE_NAME = '@imqueue/rpc';
 const patchedModules = new WeakMap<ImqueueInstrumentation, Set<RpcModule>>();
 
 /** The patched-module set for one instrumentation, created on first use. */
-function patchedFor(
-    instrumentation: ImqueueInstrumentation,
-): Set<RpcModule> {
+function patchedFor(instrumentation: ImqueueInstrumentation): Set<RpcModule> {
     const existing = patchedModules.get(instrumentation);
 
     if (existing) {
